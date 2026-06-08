@@ -190,9 +190,26 @@ export default function App() {
   const handlePayout = async (kid) => {
     const bal = getBalance(kid);
     if (bal === 0) return;
+    const payoutBatch = `payout_${Date.now()}`;
     const toUpdate = entries.filter(e => e.kid === kid);
-    await Promise.all(toUpdate.map(e => updateDoc(doc(db, "entries", e.id), { status: "paid" })));
+    await Promise.all(toUpdate.map(e => updateDoc(doc(db, "entries", e.id), { status: "paid", payoutBatch })));
     showToast(`💸 Paid out ${fmt(bal)} to ${kid}!`);
+  };
+
+  const handleUndoPayout = async (kid) => {
+    // Find the most recent payout batch for this kid
+    const kidPaid = paidOut.filter(e => e.kid === kid && e.payoutBatch);
+    if (kidPaid.length === 0) {
+      showToast("No recent payout to undo.");
+      return;
+    }
+    // Get the most recent batch id
+    const mostRecentBatch = kidPaid.reduce((latest, e) => {
+      return !latest || e.payoutBatch > latest ? e.payoutBatch : latest;
+    }, null);
+    const toRestore = kidPaid.filter(e => e.payoutBatch === mostRecentBatch);
+    await Promise.all(toRestore.map(e => updateDoc(doc(db, "entries", e.id), { status: "approved", payoutBatch: null })));
+    showToast(`↩️ Payout undone for ${kid} — ${fmt(toRestore.reduce((s,e)=>s+e.amount,0))} restored!`);
   };
 
   // ── Activity Management ──────────────────────────────────────
@@ -447,21 +464,31 @@ export default function App() {
 
           {/* Pay Out */}
           <h3 style={{ fontSize:16, fontWeight:700, color:"#555", marginBottom:10 }}>💸 Pay Out</h3>
-          <div style={{ display:"flex", gap:12, marginBottom:28 }}>
+          <div style={{ display:"flex", gap:12, marginBottom:10 }}>
             {KIDS.map(kid => {
               const c = COLORS[kid];
               const bal = getBalance(kid);
+              const hasRecentPayout = paidOut.some(e => e.kid === kid && e.payoutBatch);
               return (
                 <div key={kid} style={{ flex:1, background:c.grad, borderRadius:20, padding:"16px", textAlign:"center", border:`2px solid ${c.accent}25` }}>
                   <div style={{ fontFamily:"'Playfair Display',serif", fontWeight:700, fontSize:16, color:c.text }}>{kid}</div>
                   <div style={{ fontFamily:"'Playfair Display',serif", fontWeight:900, fontSize:32, color:c.accent, margin:"8px 0" }}>{fmt(bal)}</div>
                   <button className="btn" onClick={() => handlePayout(kid)} disabled={bal===0}
-                    style={{ width:"100%", padding:"10px 0", borderRadius:12, background:bal>0?c.accent:"#ddd", color:"#fff", fontSize:13, fontWeight:700 }}>
+                    style={{ width:"100%", padding:"10px 0", borderRadius:12, background:bal>0?c.accent:"#ddd", color:"#fff", fontSize:13, fontWeight:700, marginBottom:8 }}>
                     Mark as Paid
                   </button>
+                  {hasRecentPayout && (
+                    <button className="btn" onClick={() => handleUndoPayout(kid)}
+                      style={{ width:"100%", padding:"8px 0", borderRadius:12, background:"#fff", border:`2px solid ${c.accent}`, color:c.text, fontSize:12, fontWeight:700 }}>
+                      ↩️ Undo Last Payout
+                    </button>
+                  )}
                 </div>
               );
             })}
+          </div>
+          <div style={{ marginBottom:18, background:"#fff8f0", borderRadius:12, padding:"10px 14px", fontSize:12, color:"#aaa" }}>
+            Undo Last Payout restores the most recent payout back to the balance.
           </div>
 
           {/* Manage Activities */}
